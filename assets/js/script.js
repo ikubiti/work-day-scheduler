@@ -1,51 +1,52 @@
-// Wrap all code that interacts with the DOM in a call to jQuery to ensure that
-// the code isn't run until the browser has finished rendering all the elements
-// in the html.
+// Wrap all code to ensure that the code isn't run until the browser has finished
+// rendering all the elements in the html.
 
 $(function () {
   let scheduleEl = $('.container-lg');
   let dateDisplayEl = $('#currentDate');
   let timeDisplayEl = $('#currentTime');
-  const timeOffset = 12;
-  const DayOffset = 25;
+  let userFeedBackEl = $('#userFeedback');
+  const timeOffset = 9;
+  const workHours = 9;
+  const DayOffset = 30;
+  const minSearch = 3;
   let previousHour = DayOffset;
   let selectedDate = '';
-  // TODO: Add a listener for click events on the save button. This code should
-  // use the id in the containing time-block as a key to save the user input in
-  // local storage. HINT: What does `this` reference in the click listener
-  // function? How can DOM traversal be used to get the "hour-x" id of the
-  // time-block containing the button that was clicked? How might the id be
-  // useful when saving the description in local storage?
-  //
-  // TODO: Add code to apply the past, present, or future class to each time
-  // block by comparing the id to the current hour. HINTS: How can the id
-  // attribute of each time-block be used to conditionally add or remove the
-  // past, present, and future classes? How can Day.js be used to get the
-  // current hour in 24-hour time?
-  //
-  // TODO: Add code to get any user input that was saved in localStorage and set
-  // the values of the corresponding textarea elements. HINT: How can the id
-  // attribute of each time-block be used to do this?
+  let currentDate = '';
+  let blockStatus = '';
+  let presentHourID = DayOffset;
 
-  // display the time-blocks for the day selected
-  function displaySchedule(day, itinerary) {
+  // Pick any date to edit or schedule ahead
+  $( "#datepicker" ).datepicker({
+    changeMonth: true,
+    changeYear: true
+  });
+
+  // sets the user selected data and displays the day selected
+  $("#datepicker").on('change', function() {
+    selectedDate = dayjs($('#datepicker').val()).format('YYYY-MM-DD');
+    displaySchedule();
+  });
+
+  // dynamically display the time-blocks for the day selected
+  function displaySchedule() {
+    var currentSchedule = readDaySchedule();
+    let presentStatus = setDateBlockStatus();
     scheduleEl.empty();
-    for(let i = 0; i < itinerary.length; i++) {
-      let checkHour = i + timeOffset;
-      // container for time-block
-      let timeBlockEl = $('<div id="hour-' + checkHour +'"></div>');
-      timeBlockEl.addClass('row time-block');
-      let currentHour = parseInt(getDateTime().format('H'));
-      let status = (currentHour == checkHour) ? "present" : ((currentHour > checkHour) ? "past" : "future");
-      timeBlockEl.addClass(status);
+    for (hourlyObject in currentSchedule) {
+      let currentBlock = currentSchedule[hourlyObject];
+      let timeBlockEl = $('<div id="' + hourlyObject + '" class="row time-block"></div>');
+      if (!presentStatus) {
+        presentStatus = setTimeBlockStatus(currentBlock.hourNumber);
+      }
+      timeBlockEl.addClass(blockStatus);
 
       let timeHourEl = $('<div class="col-2 col-md-1 hour text-center py-3"></div>');
-      let hourDisplay = checkHour < 12 ? `${checkHour}AM` : ((checkHour > 12) ? `${checkHour - 12}PM` : `${checkHour}PM`);
-      timeHourEl.text(hourDisplay);
+      timeHourEl.text(currentBlock.displayHour);
       timeBlockEl.append(timeHourEl);
 
       let textInput = $('<textarea class="col-8 col-md-10 description" rows="3"></textarea>');
-      textInput.text(itinerary[i]);
+      textInput.text(currentBlock.eventTicket);
       timeBlockEl.append(textInput);
 
       let saveHourEvent = $('<button class="btn saveBtn col-2 col-md-1" aria-label="save">').append('<i class="fas fa-save" aria-hidden="true"></i>');
@@ -53,91 +54,139 @@ $(function () {
       scheduleEl.append(timeBlockEl);
     }
 
-    // user feedback element
-    // scheduleEl.append('<br><br><div id=userFeedback></div>');
-    scheduleEl.append('<div id=userFeedback></div>');
     // Scroll to present time if present
-    var presentBlock = $('.present')[0];
-    if(presentBlock){
-      presentBlock.scrollIntoView({behavior: "smooth", block: "center", inline: "center"});
+    var presentBlock = $('.present');
+    presentHourID = DayOffset;
+    if (presentBlock[0]) {
+      presentHourID = presentBlock.attr('id');
+      presentBlock[0].scrollIntoView({behavior: "smooth", block: "center", inline: "center"});
     }
   }
 
-  // save the day's schedule
-  function saveDaySchedule(day, theSchedule) {
-    localStorage.setItem(day, JSON.stringify(theSchedule));
+  // Use the current date to set the time block status
+  function setDateBlockStatus() {
+    let difference = dayjs(selectedDate).diff(dayjs(currentDate), 'day');
+    if(difference < 0) {
+      blockStatus = 'past';     // won't change
+    } else if(!difference) {
+      blockStatus = '';         // fluid and subject to change
+    } else {
+      blockStatus = 'future';   // won't change
+    }
+    return blockStatus.length;  // For quick comparisons
   }
 
+  function setTimeBlockStatus(currentTimeBlock) {
+    // Only one present hour block is possible
+    if (blockStatus === 'present') { 
+      blockStatus ='future'
+      return blockStatus.length;      
+    }
+
+    blockStatus = (previousHour == currentTimeBlock) ? "present" : ((previousHour > currentTimeBlock) ? "past" : "future");
+    // Status won't change for current session
+    if (blockStatus === 'future') {
+      return blockStatus.length;      
+    }
+
+    // Status can change
+    return 0;
+  }
+
+  // save the day's schedule
+  function saveDaySchedule(theSchedule) {
+    localStorage.setItem(selectedDate, JSON.stringify(theSchedule));
+  }
 
   // Get or generate a new empty day schedule
-  function readDaySchedule(targetDate) {
-    var dayEvents = JSON.parse(localStorage.getItem(targetDate));
-
+  function readDaySchedule() {
+    var dayEvents = JSON.parse(localStorage.getItem(selectedDate));
     if(!dayEvents) {
       dayEvents = generateDaySchedule();
-      saveDaySchedule(targetDate, dayEvents);
+      saveDaySchedule(dayEvents);
     }
 
     return dayEvents;
   }
 
   // Generate a day's schedule from scratch
-  function generateDaySchedule(){
-    var aSchedule = new Array(timeOffset);
-    aSchedule.fill('', 0, timeOffset)
-    return aSchedule;
-  }
+  function generateDaySchedule() {
+    // A full day schedule template
+    let workDaySchedule = {};
+    for (var i = timeOffset; i < timeOffset + workHours; i++) {
+      // let index = i - timeOffset;
+      let hourNumber = i % 24;
+      let hourID = 'hour-' + hourNumber;
+      let displayHour = (i % 12) === 0 ? 12 : i % 12;
+      displayHour = hourNumber < 12 ? displayHour + 'AM' : displayHour + 'PM';
 
-  // TODO: Add code to display the current date in the header of the page.
-  function updateDate(){
-    var theDate = getDateTime().format('dddd, MMMM DD, YYYY');
-    dateDisplayEl.text(theDate);
-    // Needs revision
-    selectedDate = getDateTime().format('YYYY-MM-DD');;
-  }
+      // add the hourly schedule object
+      workDaySchedule[hourID] = {
+        hourNumber: i,
+        displayHour: displayHour,
+        eventTicket: ''
+      }
+    }
 
-  // Update the schedule hourly
-  function updateHourly() {
-    var currentSchedule = getDaySchedule(getDateTime());
-    displaySchedule(getDateTime(), currentSchedule);
+    return workDaySchedule;
   }
 
   // Returns the current unix timestamp
-  function getDateTime(){
+  function getNow(){
     return dayjs.unix(dayjs().unix());
   }
 
-  function getDaySchedule(targetDate){
-    var dateTarget = targetDate.format('YYYY-MM-DD');
-    let newSchedule = readDaySchedule(dateTarget);
-    return newSchedule;
-  }
-
-  // function init(){
-  //   updateDate();
-  //   var currentSchedule = getDaySchedule(getDateTime());
-  //   displaySchedule(getDateTime(), currentSchedule);
-
-  //   // const date1 = dayjs('2019-01-25');
-  //   // const date2 = dayjs('2018-06-05');
-  //   // console.log(date1.diff(date2, 'day'));
-
-  // }
-
-  // init();
-
-  function displayUserMessage(message) {
-    let userMessage = $('#userFeedback');
-    userMessage.text(message);
-    userMessage[0].scrollIntoView({behavior: "smooth", block: "center"});
+  // Provide feedback about success or failure of event scheduling
+  function displayUserMessage(message, timeID, background) {
+    userFeedBackEl.addClass(background)
+    userFeedBackEl.addClass('border border-primary')
+    userFeedBackEl.text(message);
+    userFeedBackEl[0].scrollIntoView({behavior: "smooth", block: "center"});    
 
     // Provide user with adequate time to observe feedback
-    setTimeout(function(){
-      userMessage.text('');
-    }, 2000);
+    setTimeout(function () {
+      userFeedBackEl.removeClass(background)
+      userFeedBackEl.removeClass('border border-success')
+      userFeedBackEl.text('');
+      displaySchedule();
+      let timeBlock = $('#' + timeID)[0];
+      timeBlock.scrollIntoView({behavior: "smooth", block: "center", inline: "center"});
+    }, 3000);
   }
 
-  // Save uer input if any
+  // Initialize the application's library
+  function getDictionary() {
+    let tempDict = JSON.parse(localStorage.getItem('dictionary'));
+    if (!tempDict) {
+      tempDict = [];
+      setDictionary(tempDict);
+    }
+
+    return tempDict;
+  }
+
+  // save the library to local storage
+  function setDictionary(newLibrary) {
+    localStorage.setItem('dictionary', JSON.stringify(newLibrary));    
+  }
+
+  // save new events to library
+  function saveDictionary(newSentence) {
+    var fullLibrary = getDictionary();
+    let dictionary = fullLibrary.filter(function (sentence) {
+      return sentence.toLowerCase().includes(newSentence.toLowerCase());
+    });
+
+    if (dictionary.length > 0) {
+      return;
+    }
+
+    // This is a new sentence, add it to the dictionary
+    fullLibrary.push(newSentence);
+    setDictionary(fullLibrary);
+  }
+
+  // Save user input if any
   function saveImportantEvent(event) {
     var ticketTarget = $(event.target);
     // couldn't find a leaner approach to prevent child click events
@@ -147,45 +196,72 @@ $(function () {
     
     // get ticket update
     let currentTicket = ticketTarget.siblings('.description').val().trim();
+    let targetBlock = ticketTarget.parent();
+    let blockID = targetBlock.attr('id');
     if (!currentTicket.length) {
-      displayUserMessage('Update failed!!! BLANK EVENT CREATED!');
+      displayUserMessage('Update failed!!! BLANK EVENT CREATED!', blockID, 'bg-danger');
       return;
     }
 
-    let hourSelected = parseInt(ticketTarget.parent().attr('id').slice(5));
-    let hourIndex = hourSelected - timeOffset;
-    console.log(currentTicket);
-    console.log(hourSelected);
-    console.log($('#currentDate').text());
-    console.log(selectedDate);
-
-    let storedEvents = readDaySchedule(selectedDate);
-    storedEvents[hourIndex] = currentTicket;
-    saveDaySchedule(selectedDate, storedEvents);
-    displayUserMessage('Event Update successfully saved!');
+    let storedEvents = readDaySchedule();
+    storedEvents[blockID].eventTicket = currentTicket;
+    saveDaySchedule(storedEvents);
+    saveDictionary(currentTicket);
+    displayUserMessage('Event Update successfully saved!', blockID, 'bg-primary');
   }
+
+  // Activate autocomplete after 3 character inputs
+  function getAutoComplete(event) {
+    $(event.target).autocomplete({
+      minLength: minSearch,
+      source: function (request, response) {
+        response( $.ui.autocomplete.filter(
+        getDictionary(), request.term ) );
+      }
+    });
+  }
+  
 
   // Display the current time in the header of the page
   function displayTime(){
-    var theTime = getDateTime().format('hh:mm:ss A');
-    timeDisplayEl.text(theTime);
-
+    var presentTime = getNow();
+    timeDisplayEl.text(presentTime.format('hh:mm:ss A'));
     // update the schedule hourly and automatically update the date 
-    let currentHour = parseInt(getDateTime().format('H'));
+    let currentHour = parseInt(presentTime.format('H'));
     if(currentHour != previousHour){
-      if(!currentHour || previousHour == DayOffset) {
-        updateDate();
+        // If day changes, update the display
+      if (!currentHour || previousHour == DayOffset) {
+        // Update the display date
+        dateDisplayEl.text(presentTime.format('dddd, MMMM DD, YYYY'));
+        // Set the current date
+        currentDate = presentTime.format('YYYY-MM-DD');
       }
-
+      
+      // update the display hourly for  current day
       previousHour = currentHour;
-      updateHourly();
+      if (currentDate == selectedDate || presentHourID === 'hour-23') {
+        // Follow present day if viewing present day
+        selectedDate = currentDate;
+        displaySchedule();
+      }
     }
-  }  
+  }
+  
+  // Initialize the application
+  function init(){
+    // Initializes the selected Date to the current Date
+    selectedDate = getNow().format('YYYY-MM-DD');
+  }
+
+  // Start the application
+  init();  
 
   // Show the current time of day
   setInterval(displayTime, 1000);
 
   // get any schedule update or edit from user
-  // $('.saveBtn').on('click', saveImportantEvent);
   scheduleEl.on('click', '.saveBtn', saveImportantEvent);
+
+  // Engage autocomplete when in focus
+  scheduleEl.on('focus', '.description', getAutoComplete);
 });
